@@ -7,6 +7,16 @@
 //! This crate provides a common interface for all XIMEA cameras.
 //! It is a higher level wrapper of the xiapi-sys crate which is generated automatically
 //! (via bindgen) from the XIMEA C API.
+//!
+//! # Features
+//!
+//! - `image` (default): Enables conversion to the `image` crate's `ImageBuffer` type.
+//!
+//! # Zero-Copy Buffer Support
+//!
+//! For high-performance applications (e.g., GStreamer pipelines), use
+//! [`AcquisitionBuffer::next_image_into`] to have the camera write directly into
+//! your pre-allocated buffer, avoiding intermediate copies.
 
 #![warn(missing_docs)]
 

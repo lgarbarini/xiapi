@@ -10,8 +10,8 @@ use std::os::raw::c_char;
 use std::str::from_utf8;
 
 use paste::paste;
-use xiapi_sys::*;
 use xiapi_sys::XI_RET::XI_INVALID_ARG;
+use xiapi_sys::*;
 
 use crate::Image;
 use crate::Roi;
@@ -800,6 +800,108 @@ impl AcquisitionBuffer {
     /// ```
     pub fn software_trigger(&mut self) -> Result<(), XI_RETURN> {
         unsafe { self.camera.set_param(XI_PRM_TRG_SOFTWARE, XI_SWITCH::XI_ON) }
+    }
+
+    /// Get the next image, writing directly into the provided buffer (zero-copy).
+    ///
+    /// This method configures xiapi to write image data directly into the provided
+    /// buffer slice. No intermediate copies occur - the camera DMA engine writes
+    /// directly to your buffer memory.
+    ///
+    /// This is useful for integration with buffer pools (e.g., GStreamer) where you
+    /// want to avoid allocations and copies in the hot path.
+    ///
+    /// # Requirements
+    ///
+    /// **Before starting acquisition**, you must set the buffer policy to unsafe mode:
+    /// ```ignore
+    /// cam.set_buffer_policy(xiapi::XI_BP::XI_BP_UNSAFE as i32)?;
+    /// ```
+    ///
+    /// The buffer must be large enough to hold the image data. The required size
+    /// depends on the image format and dimensions:
+    /// - For 8-bit formats: `width * height` bytes
+    /// - For 16-bit formats: `width * height * 2` bytes
+    /// - For RGB24: `width * height * 3` bytes
+    /// - For RGB32: `width * height * 4` bytes
+    ///
+    /// # Arguments
+    ///
+    /// * `buffer` - A mutable byte slice to write the image data into
+    /// * `timeout` - Timeout in milliseconds for waiting for the next image. None means infinite.
+    ///
+    /// # Returns
+    ///
+    /// Returns the image metadata (`XI_IMG`) on success. The image data has been
+    /// written directly into the provided buffer.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let mut cam = xiapi::open_device(None)?;
+    ///
+    /// // IMPORTANT: Enable unsafe buffer mode for zero-copy
+    /// cam.set_buffer_policy(xiapi::XI_BP::XI_BP_UNSAFE as i32)?;
+    ///
+    /// // Configure image format and dimensions
+    /// cam.set_width(1920)?;
+    /// cam.set_height(1080)?;
+    ///
+    /// let acq = cam.start_acquisition()?;
+    ///
+    /// // Pre-allocate buffer (or use a buffer from a pool)
+    /// let buffer_size = 1920 * 1080; // For 8-bit format
+    /// let mut buffer = vec![0u8; buffer_size];
+    ///
+    /// // Camera writes directly into our buffer - zero copy!
+    /// let img_metadata = acq.next_image_into(&mut buffer, None)?;
+    ///
+    /// println!("Frame {}: {}x{}", img_metadata.nframe, img_metadata.width, img_metadata.height);
+    /// // buffer now contains the image data
+    /// ```
+    ///
+    /// # GStreamer Integration Example
+    ///
+    /// ```ignore
+    /// use gstreamer as gst;
+    /// use gst::prelude::*;
+    ///
+    /// // Acquire buffer from GStreamer pool
+    /// let mut gst_buffer = pool.acquire_buffer(None)?;
+    /// let buffer_ref = gst_buffer.get_mut().unwrap();
+    /// let mut map = buffer_ref.map_writable()?;
+    ///
+    /// // Camera writes directly into GStreamer buffer
+    /// let img_metadata = acq.next_image_into(map.as_mut_slice(), None)?;
+    ///
+    /// drop(map); // Release the map before pushing
+    /// appsrc.push_buffer(gst_buffer)?;
+    /// ```
+    pub fn next_image_into(
+        &self,
+        buffer: &mut [u8],
+        timeout: Option<u32>,
+    ) -> Result<XI_IMG, XI_RETURN> {
+        let timeout = timeout.unwrap_or(u32::MAX);
+
+        // Initialize XI_IMG with the buffer pointer set to the user's buffer
+        // This tells xiapi to write directly to the provided buffer (zero-copy)
+        let mut xi_img = unsafe {
+            let mut img = MaybeUninit::<XI_IMG>::zeroed().assume_init();
+            img.size = size_of::<XI_IMG>() as u32;
+            img.bp = buffer.as_mut_ptr() as *mut std::os::raw::c_void;
+            img.bp_size = buffer.len() as u32;
+            img
+        };
+
+        // Call xiGetImage - camera will write directly to the provided buffer
+        let ret = unsafe { xiapi_sys::xiGetImage(self.camera.device_handle, timeout, &mut xi_img) };
+
+        if ret as XI_RET::Type != XI_RET::XI_OK {
+            return Err(ret);
+        }
+
+        Ok(xi_img)
     }
 }
 
