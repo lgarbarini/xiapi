@@ -640,6 +640,16 @@ impl Camera {
         /// Bit depth of the image returned by [Self::next_image()]
         mut image_data_bit_depth: XI_BIT_DEPTH::Type;
 
+        /// Enable bit packing on transport data layer to increase maximum frame rate with 10 or 12 bits per pixel data.
+        /// This feature enables bit packing on transport data layer, thus increasing the maximum frame rate
+        /// when data with 10 or 12 bits per pixel is transported.
+        /// Note: Invalidated by changes to image_data_format, output_data_bit_depth, binning, decimation, or shutter_type.
+        mut output_data_packing: i32;
+
+        /// Select output data packing type: XI_DATA_PACK_XI_GROUPING (ximea grouping 10g160, 12g192, 14g224)
+        /// or XI_DATA_PACK_PFNC_LSB_PACKING (PFNC packing 10p, 12p).
+        mut output_data_packing_type: i32;
+
         /// Enable column fpn correction in camera
         mut column_fpn_correction: XI_SWITCH::Type;
 
